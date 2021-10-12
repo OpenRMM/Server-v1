@@ -102,10 +102,10 @@ def on_message(client, userdata, message):
                 cursor.execute(add, data)
                 rowID = cursor.lastrowid
 
-                add = ("UPDATE computerdata SET hostname=%s, last_update=%s WHERE ID=%s")
+                add = ("UPDATE computerdata SET last_update=%s WHERE ID=%s")
                 x = datetime.datetime.now()
                 last_update = x.strftime("%Y-%m-%d %H:%M:%S")
-                data = (os.environ['COMPUTERNAME'], last_update, ID)
+                data = (last_update, ID)
                 cursor.execute(add, data)
                 mysql.commit()
 
