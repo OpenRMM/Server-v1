@@ -88,11 +88,12 @@ def on_message(client, userdata, message):
                 mysql.commit()
             if(title == "CMD"):
                 hostname = topic[0]
+                status = "Received"
                 print("CMD Command Received for: " + hostname)
                 x = datetime.datetime.now()
                 last_update = x.strftime("%Y-%m-%d %H:%M:%S")
                 add = ("UPDATE commands SET data_received=%s, time_received=%s, status=%s WHERE computerID=%s")
-                data = (message.payload, last_update, hostname, hostname)
+                data = (message.payload, last_update, status, hostname)
                 cursor.execute(add, data)
                 mysql.commit()
             if(WMIName != ""):
