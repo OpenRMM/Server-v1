@@ -16,7 +16,7 @@ MQTT_Password = "*******"
 MQTT_Port = 1884
 MQTT_Topic = "#"
 
-MYSQL_Server
+MYSQL_Server = "*******"
 MYSQL_Username = "*******"
 MYSQL_Password = "*******"
 MYSQL_Port = 3306
@@ -24,17 +24,19 @@ MYSQL_Database = "OpenRMM"
 
 Server_Version = "1.0"
 
+LOG_File = "C:\OpenRMMServer.log"
+
 ###########################################################################
 
 # The callback for when the client receives a CONNACK response from the server.
 def on_connect(client, userdata, flags, rc):
-    print("MQTT connected with result code "+str(rc))
+    log("MQTT connected with result code: " + str(rc), "")
     if (rc==0):
         mqtt.publish("Server/Status", "Online", qos=1, retain=True)
 
 def on_disconnect(client, userdata, rc):
     if rc != 0:
-        print("MQTT Unexpected disconnection.")
+        log("MQTT Unexpected disconnection.", "")
 
 def on_message(client, userdata, message):
         #print("Received message '" + str(message.payload) + "' on topic '" + message.topic + "' with QoS " + str(message.qos))
@@ -50,19 +52,19 @@ def on_message(client, userdata, message):
             cursor.fetchall()
 
             if(cursor.rowcount == 0):
-                print("Computer not found, adding as a new computer")
+                log("Computer not found, adding as a new computer", "")
                 add = ("INSERT INTO computerdata (hostname) VALUES ('"+hostname+"')")
                 cursor.execute(add)
                 ID = cursor.lastrowid
                 mysql.commit()
-                print("Added New Computer, ID:" + str(ID))
+                log("Added New Computer, ID:" + str(ID), "")
                 mqtt.publish(hostname + "/Commands/ID", ID, qos=1, retain=False)
        
         if(typeofdata == "Status"):
             hostname = topic[0]
             online = "0"
             if(message.payload.decode("utf-8") == "Online"): online = "1"
-            print("Setting computer: " + hostname + ", " + message.payload.decode("utf-8"))
+            log("Setting computer: " + hostname + ", " + message.payload.decode("utf-8"), "")
             
             add = ("UPDATE computerdata SET online=%s, last_update=%s WHERE hostname=%s")
             x = datetime.datetime.now()
@@ -102,7 +104,7 @@ def on_message(client, userdata, message):
             if(title == "Filesystem"): WMIName = "WMI_Filesystem"
 
             if(title == "Screenshot"):
-                print("Saving Screenshot")
+                log("Saving Screenshot", "")
                 add = ("INSERT INTO screenshots (ComputerID, image) VALUES (%s, %s) ON DUPLICATE KEY UPDATE image=%s")
                 data = (ID, message.payload, message.payload)
                 cursor.execute(add, data)
@@ -110,7 +112,7 @@ def on_message(client, userdata, message):
             if(title == "CMD"):
                 hostname = topic[0]
                 status = "Received"
-                print("CMD Command Received for: " + hostname)
+                log("CMD Command Received for: " + hostname, "")
                 x = datetime.datetime.now()
                 last_update = x.strftime("%Y-%m-%d %H:%M:%S")
                 add = ("UPDATE commands SET data_received=%s, time_received=%s, status=%s WHERE computerID=%s")
@@ -130,26 +132,32 @@ def on_message(client, userdata, message):
                 cursor.execute(add, data)
                 mysql.commit()
 
-                print("Added " + WMIName + ", Row:" + str(rowID))
+                log("Added " + WMIName + ", Row:" + str(rowID), "")
 
         cursor.close()
-    except:
-        print("Error")
+    except Exception as e:
+        log("OnMQTTMessage Error", e)
 
 
-print("Starting Setup")
+def log(name, message):
+    print(name)
+    print(message)
+    try:
+        f = open(LOG_File, "a")
+        f.write(str(name) + ": " + str(message) + "\n")
+        f.close()
+    except Exception as e:
+        print("Error saving to log file")
+        print(e)
+
+log("Starting Setup", "")
 
 try:
     mysql = mysql.connector.connect(user=MYSQL_Username, password=MYSQL_Password,host=MYSQL_Server, port=MYSQL_Port, database=MYSQL_Database)
 except mysql.connector.Error as err:
-    if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-        print("Something is wrong with your user name or password")
-    elif err.errno == errorcode.ER_BAD_DB_ERROR:
-        print("Database does not exist")
-    else:
-        print(err)
+    log("MySQL Error", err)
 
-mqtt = mqtt.Client(client_id="Server", clean_session=True)
+mqtt = mqtt.Client(client_id="Server1", clean_session=True)
 mqtt.username_pw_set(MQTT_Username, MQTT_Password)
 mqtt.will_set("Server/Status", "Offline", qos=1, retain=True)
 mqtt.connect(MQTT_Server, port=MQTT_Port)
