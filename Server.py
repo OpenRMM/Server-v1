@@ -80,6 +80,7 @@ def on_message(client, userdata, message):
             if(title == "NetworkAdapters"): WMIName = "WMI_NetworkAdapters"
             if(title == "Processor"): WMIName = "WMI_Processor"
             if(title == "Firewall"): WMIName = "WMI_Firewall"
+            if(title == "PnPEntitys"): WMIName = "WMI_PnPEntity"
             
             if(title == "Screenshot"):
                 print("Saving Screenshot")
