@@ -98,7 +98,8 @@ def on_message(client, userdata, message):
             if(title == "Processor"): WMIName = "WMI_Processor"
             if(title == "Firewall"): WMIName = "WMI_Firewall"
             if(title == "PnPEntitys"): WMIName = "WMI_PnPEntity"
-            
+            if(title == "Battery"): WMIName = "WMI_Battery"
+
             if(title == "Screenshot"):
                 print("Saving Screenshot")
                 add = ("INSERT INTO screenshots (ComputerID, image) VALUES (%s, %s) ON DUPLICATE KEY UPDATE image=%s")
