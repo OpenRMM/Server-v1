@@ -122,8 +122,8 @@ def on_message(client, userdata, message):
                 cursor.execute(add, data)
                 mysql.commit()
             if(title == "Heartbeat"):
-                add = ("UPDATE computerdata SET heartbeat=%s WHERE ID=%s")
-                data = (last_update, ID)
+                add = ("UPDATE computerdata SET heartbeat=%s, last_update=%s WHERE ID=%s")
+                data = (last_update, last_update, ID)
                 cursor.execute(add, data)
                 mysql.commit()
             if(WMIName != ""):
@@ -131,8 +131,8 @@ def on_message(client, userdata, message):
                 data = (ID, WMIName, message.payload)
                 cursor.execute(add, data)
                 rowID = cursor.lastrowid
-                add = ("UPDATE computerdata SET heartbeat=%s WHERE ID=%s")
-                data = (last_update, ID)
+                add = ("UPDATE computerdata SET heartbeat=%s, last_update=%s WHERE ID=%s")
+                data = (last_update, last_update, ID)
                 cursor.execute(add, data)
                 mysql.commit()
 
