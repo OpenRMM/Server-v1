@@ -9,6 +9,23 @@ import threading
 import mysql.connector
 import datetime
 
+################################# SETUP ##################################
+MQTT_Server = "*******"
+MQTT_Username = "*******"
+MQTT_Password = "*******"
+MQTT_Port = 1884
+MQTT_Topic = "#"
+
+MYSQL_Server
+MYSQL_Username = "*******"
+MYSQL_Password = "*******"
+MYSQL_Port = 3306
+MYSQL_Database = "OpenRMM"
+
+Server_Version = "1.0"
+
+###########################################################################
+
 # The callback for when the client receives a CONNACK response from the server.
 def on_connect(client, userdata, flags, rc):
     print("MQTT connected with result code "+str(rc))
@@ -119,10 +136,9 @@ def on_message(client, userdata, message):
 
 
 print("Starting Setup")
-hostname = os.environ['COMPUTERNAME']
 
 try:
-    mysql = mysql.connector.connect(user='*****', password='******',host='localhost', port=3306, database='OpenRMM')
+    mysql = mysql.connector.connect(user=MYSQL_Username, password=MYSQL_Password,host=MYSQL_Server, port=MYSQL_Port, database=MYSQL_Database)
 except mysql.connector.Error as err:
     if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
         print("Something is wrong with your user name or password")
@@ -131,15 +147,14 @@ except mysql.connector.Error as err:
     else:
         print(err)
 
-
 mqtt = mqtt.Client(client_id="Server", clean_session=True)
-mqtt.username_pw_set("*******", "********")
+mqtt.username_pw_set(MQTT_Username, MQTT_Password)
 mqtt.will_set("Server/Status", "Offline", qos=1, retain=True)
-mqtt.connect("localhost", port=1883)
+mqtt.connect(MQTT_Server, port=MQTT_Port)
 mqtt.on_message = on_message
 mqtt.on_connect = on_connect
 mqtt.on_disconnect = on_disconnect
-mqtt.subscribe("#", qos=1)
+mqtt.subscribe(MQTT_Topic, qos=1)
 mqtt.loop_start()
 
 count = 0
