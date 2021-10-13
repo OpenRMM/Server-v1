@@ -77,6 +77,10 @@ def on_message(client, userdata, message):
             ID = topic[0]
             title = topic[2]
             WMIName = ""
+
+            x = datetime.datetime.now()
+            last_update = x.strftime("%Y-%m-%d %H:%M:%S")
+
             if(title == "General"): WMIName = "WMI_ComputerSystem"
             if(title == "BIOS"): WMIName = "WMI_BIOS"
             if(title == "Startup"): WMIName = "WMI_Startup"
@@ -113,10 +117,13 @@ def on_message(client, userdata, message):
                 hostname = topic[0]
                 status = "Received"
                 log("CMD Command Received for: " + hostname, "")
-                x = datetime.datetime.now()
-                last_update = x.strftime("%Y-%m-%d %H:%M:%S")
                 add = ("UPDATE commands SET data_received=%s, time_received=%s, status=%s WHERE computerID=%s")
                 data = (message.payload, last_update, status, hostname)
+                cursor.execute(add, data)
+                mysql.commit()
+            if(title == "Heartbeat"):
+                add = ("UPDATE computerdata SET heartbeat=%s WHERE ID=%s")
+                data = (last_update, ID)
                 cursor.execute(add, data)
                 mysql.commit()
             if(WMIName != ""):
@@ -124,10 +131,7 @@ def on_message(client, userdata, message):
                 data = (ID, WMIName, message.payload)
                 cursor.execute(add, data)
                 rowID = cursor.lastrowid
-
-                add = ("UPDATE computerdata SET last_update=%s WHERE ID=%s")
-                x = datetime.datetime.now()
-                last_update = x.strftime("%Y-%m-%d %H:%M:%S")
+                add = ("UPDATE computerdata SET heartbeat=%s WHERE ID=%s")
                 data = (last_update, ID)
                 cursor.execute(add, data)
                 mysql.commit()
