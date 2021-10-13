@@ -99,6 +99,7 @@ def on_message(client, userdata, message):
             if(title == "Firewall"): WMIName = "WMI_Firewall"
             if(title == "PnPEntitys"): WMIName = "WMI_PnPEntity"
             if(title == "Battery"): WMIName = "WMI_Battery"
+            if(title == "Filesystem"): WMIName = "WMI_Filesystem"
 
             if(title == "Screenshot"):
                 print("Saving Screenshot")
