@@ -79,10 +79,11 @@ def on_message(client, userdata, message):
             if(title == "Products"): WMIName = "WMI_Product"
             if(title == "NetworkAdapters"): WMIName = "WMI_NetworkAdapters"
             if(title == "Processor"): WMIName = "WMI_Processor"
+            if(title == "Firewall"): WMIName = "WMI_Firewall"
             
             if(title == "Screenshot"):
                 print("Saving Screenshot")
-                add = ("INSERT INTO screenshots (ComputerID, image) VALUES (%s, %s) ON DUPLICATE KEY UPDATE image=%s;")
+                add = ("INSERT INTO screenshots (ComputerID, image) VALUES (%s, %s) ON DUPLICATE KEY UPDATE image=%s")
                 data = (ID, message.payload, message.payload)
                 cursor.execute(add, data)
                 mysql.commit()
