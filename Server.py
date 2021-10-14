@@ -25,6 +25,7 @@ MYSQL_Database = "OpenRMM"
 Server_Version = "1.0"
 
 LOG_File = "C:\OpenRMMServer.log"
+DEBUG = False
 
 ###########################################################################
 
@@ -146,13 +147,14 @@ def on_message(client, userdata, message):
 def log(name, message):
     print(name)
     print(message)
-    try:
-        f = open(LOG_File, "a")
-        f.write(str(name) + ": " + str(message) + "\n")
-        f.close()
-    except Exception as e:
-        print("Error saving to log file")
-        print(e)
+    if(DEBUG):
+        try:
+            f = open(LOG_File, "a")
+            f.write(str(name) + ": " + str(message) + "\n")
+            f.close()
+        except Exception as e:
+            print("Error saving to log file")
+            print(e)
 
 log("Starting Setup", "")
 
