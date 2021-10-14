@@ -8,19 +8,20 @@ import subprocess
 import threading
 import mysql.connector
 import datetime
+from mysql.connector.locales.eng import client_error
 
 ################################# SETUP ##################################
-MQTT_Server = "*******"
-MQTT_Username = "*******"
-MQTT_Password = "*******"
+MQTT_Server = "*****"
+MQTT_Username = "*****"
+MQTT_Password = "*****"
 MQTT_Port = 1884
 MQTT_Topic = "#"
 
-MYSQL_Server = "*******"
-MYSQL_Username = "*******"
-MYSQL_Password = "*******"
-MYSQL_Port = 3306
-MYSQL_Database = "OpenRMM"
+MYSQL_Server = "*****"
+MYSQL_Username = "*****"
+MYSQL_Password = "*****"
+MYSQL_Port = 3307
+MYSQL_Database = "rmm"
 
 Server_Version = "1.0"
 
@@ -44,9 +45,9 @@ def on_message(client, userdata, message):
     try:       
         topic = message.topic.split("/")
         typeofdata = topic[1]
-        cursor = mysql.cursor()
               
         if(typeofdata == "Setup"):
+            cursor = mysql.cursor()
             hostname = topic[0]
             query = ("SELECT * FROM computerdata WHERE hostname='"+hostname+"' LIMIT 1")
             cursor.execute(query)
@@ -58,10 +59,12 @@ def on_message(client, userdata, message):
                 cursor.execute(add)
                 ID = cursor.lastrowid
                 mysql.commit()
+                cursor.close()
                 log("Added New Computer, ID:" + str(ID), "")
                 mqtt.publish(hostname + "/Commands/ID", ID, qos=1, retain=False)
        
         if(typeofdata == "Status"):
+            cursor = mysql.cursor()
             hostname = topic[0]
             online = "0"
             if(message.payload.decode("utf-8") == "Online"): online = "1"
@@ -73,8 +76,10 @@ def on_message(client, userdata, message):
             data = (online, last_update, hostname)
             cursor.execute(add, data)
             mysql.commit()
+            cursor.close()
 
         if(typeofdata == "Data"):
+            cursor = mysql.cursor()
             ID = topic[0]
             title = topic[2]
             WMIName = ""
@@ -107,6 +112,7 @@ def on_message(client, userdata, message):
             if(title == "PnPEntitys"): WMIName = "WMI_PnPEntity"
             if(title == "Battery"): WMIName = "WMI_Battery"
             if(title == "Filesystem"): WMIName = "WMI_Filesystem"
+            if(title == "Agent"): WMIName = "Agent"
 
             if(title == "Screenshot"):
                 log("Saving Screenshot", "")
@@ -139,7 +145,7 @@ def on_message(client, userdata, message):
 
                 log("Added " + WMIName + ", Row:" + str(rowID), "")
 
-        cursor.close()
+                cursor.close()
     except Exception as e:
         log("OnMQTTMessage Error", e)
 
@@ -160,6 +166,7 @@ log("Starting Setup", "")
 
 try:
     mysql = mysql.connector.connect(user=MYSQL_Username, password=MYSQL_Password,host=MYSQL_Server, port=MYSQL_Port, database=MYSQL_Database)
+    mysql.reconnect(attempts=10, delay=0)
 except mysql.connector.Error as err:
     log("MySQL Error", err)
 
