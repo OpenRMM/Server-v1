@@ -9,17 +9,18 @@ import threading
 import mysql.connector
 import datetime
 from mysql.connector.locales.eng import client_error
+from random import randint
 
 ################################# SETUP ##################################
-MQTT_Server = "*****"
-MQTT_Username = "*****"
-MQTT_Password = "*****"
+MQTT_Server = "******"
+MQTT_Username = "******"
+MQTT_Password = "******"
 MQTT_Port = 1884
 MQTT_Topic = "#"
 
-MYSQL_Server = "*****"
-MYSQL_Username = "*****"
-MYSQL_Password = "*****"
+MYSQL_Server = "******"
+MYSQL_Username = "******"
+MYSQL_Password = "******"
 MYSQL_Port = 3307
 MYSQL_Database = "rmm"
 
@@ -170,7 +171,8 @@ try:
 except mysql.connector.Error as err:
     log("MySQL Error", err)
 
-mqtt = mqtt.Client(client_id="Server1", clean_session=True)
+client_id = os.environ['COMPUTERNAME'] + str(randint(1000, 10000))
+mqtt = mqtt.Client(client_id=client_id, clean_session=True)
 mqtt.username_pw_set(MQTT_Username, MQTT_Password)
 mqtt.will_set("Server/Status", "Offline", qos=1, retain=True)
 mqtt.connect(MQTT_Server, port=MQTT_Port)
