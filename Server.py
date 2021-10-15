@@ -12,15 +12,15 @@ from mysql.connector.locales.eng import client_error
 from random import randint
 
 ################################# SETUP ##################################
-MQTT_Server = "****"
-MQTT_Username = "****"
-MQTT_Password = "****"
+MQTT_Server = "*****"
+MQTT_Username = "*****"
+MQTT_Password = "*****"
 MQTT_Port = 1884
 MQTT_Topic = "#"
 
-MYSQL_Server = "****"
-MYSQL_Username = "****"
-MYSQL_Password = "****"
+MYSQL_Server = "*****"
+MYSQL_Username = "*****"
+MYSQL_Password = "*****"
 MYSQL_Port = 3307
 MYSQL_Database = "rmm"
 
@@ -121,6 +121,13 @@ def on_message(client, userdata, message):
             if(title == "Battery"): WMIName = "WMI_Battery"
             if(title == "Filesystem"): WMIName = "WMI_Filesystem"
             if(title == "Agent"): WMIName = "Agent"
+            if(title == "OklaSpeedtest"): WMIName = "OklaSpeedtest"
+
+            if(title == "AgentSettings"):
+                add = ("UPDATE computerdata SET heartbeat=%s, last_update=%s, agent_settings=%s WHERE ID=%s")
+                data = (last_update, last_update, message.payload, ID)
+                cursor.execute(add, data)
+                mysql.commit()
 
             if(title == "Screenshot"):
                 log("Saving Screenshot", "")
@@ -157,10 +164,8 @@ def on_message(client, userdata, message):
     except Exception as e:
         log("OnMQTTMessage Error", e)
 
-
 def log(name, message):
-    print(name)
-    print(message)
+    print(name + ": " + message)
     if(DEBUG):
         try:
             f = open(LOG_File, "a")
