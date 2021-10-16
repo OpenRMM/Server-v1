@@ -104,11 +104,13 @@ def on_message(client, userdata, message):
             if(title == "UserAccounts"): WMIName = "WMI_UserAccount"
             if(title == "VideoConfiguration"): WMIName = "WMI_VideoConfiguration"
             if(title == "LogicalDisk"): WMIName = "WMI_LogicalDisk"
+            if(title == "MappedLogicalDisk"): WMIName = "WMI_MappedLogicalDisk"
             if(title == "PhysicalMemory"): WMIName = "WMI_PhysicalMemory"
             if(title == "PointingDevice"): WMIName = "WMI_PointingDevice"
             if(title == "Keyboard"): WMIName = "WMI_Keyboard"
             if(title == "BaseBoard"): WMIName = "WMI_BaseBoard"
             if(title == "DesktopMonitor"): WMIName = "WMI_DesktopMonitor"
+            if(title == "NetworkLoginProfile"): WMIName = "WMI_NetworkLoginProfile"
             if(title == "Printer"): WMIName = "WMI_Printers"
             if(title == "PnPEntity"): WMIName = "WMI_PnPEntity"
             if(title == "SoundDevices"): WMIName = "WMI_SoundDevice"
@@ -122,6 +124,10 @@ def on_message(client, userdata, message):
             if(title == "Filesystem"): WMIName = "WMI_Filesystem"
             if(title == "Agent"): WMIName = "Agent"
             if(title == "OklaSpeedtest"): WMIName = "OklaSpeedtest"
+            if(title == "EventLog_System"): WMIName = "EventLog_System"
+            if(title == "EventLog_Application"): WMIName = "EventLog_Application"
+            if(title == "EventLog_Security"): WMIName = "EventLog_Security"
+            if(title == "EventLog_Setup"): WMIName = "EventLog_Setup"
 
             if(title == "AgentSettings"):
                 add = ("UPDATE computerdata SET heartbeat=%s, last_update=%s, agent_settings=%s WHERE ID=%s")
@@ -159,7 +165,6 @@ def on_message(client, userdata, message):
                 mysql.commit()
 
                 log("Added " + WMIName + ", Row:" + str(rowID), "")
-
                 cursor.close()
     except Exception as e:
         log("OnMQTTMessage Error", e)
