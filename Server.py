@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+from os.path import exists
 import paho.mqtt.client as mqtt
 import json
 import time
@@ -12,9 +13,9 @@ from mysql.connector.locales.eng import client_error
 from random import randint
 
 ################################# SETUP ##################################
-MQTT_Server = "****"
+MQTT_Server = "***"
 MQTT_Username = "****"
-MQTT_Password = "****"
+MQTT_Password = "*****"
 MQTT_Port = 1884
 MQTT_Topic = "#"
 
@@ -24,7 +25,7 @@ MYSQL_Password = "*****"
 MYSQL_Port = 3307
 MYSQL_Database = "rmm"
 
-Server_Version = "1.0"
+Server_Version = "1.1"
 
 LOG_File = "C:\OpenRMMServer.log"
 DEBUG = False
@@ -84,6 +85,20 @@ def on_message(client, userdata, message):
                 last_update = x.strftime("%Y-%m-%d %H:%M:%S")
                 data = (online, last_update, ID)
                 cursor.execute(add, data)
+
+                # Detect if the server is running an Agent, if so adjust for the front end
+                try:
+                    if(exists("C:\OpenRMM.json")): # Agent Installed
+                        f = open("C:\OpenRMM.json", "r")
+                        Agent = json.loads(f.read())
+                        if(Agent["ID"] == ID):
+                            print("OpenRMM Agent Detected, Computer ID: " + Agent["ID"])
+                            add = ("UPDATE computerdata SET computer_type=%s WHERE ID=%s")
+                            data = ("OpenRMM Server", Agent["ID"])
+                            cursor.execute(add, data)
+                except Exception as e:
+                    print("Cannot Determine if Agent is Installed")
+                    print(e)
                     
                 mysql.commit()
                 cursor.close()
@@ -93,7 +108,6 @@ def on_message(client, userdata, message):
                 ID = topic[0]
                 title = topic[2]
                 WMIName = ""
-
                 x = datetime.datetime.now()
                 last_update = x.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -138,17 +152,16 @@ def on_message(client, userdata, message):
                     mysql.commit()
 
                 if(title == "Screenshot"):
-                    log("Saving Screenshot", "")
+                    log("Saving Screenshot for Computer " + str(ID), "")
                     add = ("INSERT INTO screenshots (ComputerID, image) VALUES (%s, %s) ON DUPLICATE KEY UPDATE image=%s")
                     data = (ID, message.payload, message.payload)
                     cursor.execute(add, data)
                     mysql.commit()
                 if(title == "CMD"):
-                    hostname = topic[0]
                     status = "Received"
-                    log("CMD Command Received for: " + hostname, "")
+                    log("CMD Command Received for: " + ID, "")
                     add = ("UPDATE commands SET data_received=%s, time_received=%s, status=%s WHERE computerID=%s")
-                    data = (message.payload, last_update, status, hostname)
+                    data = (message.payload, last_update, status, ID)
                     cursor.execute(add, data)
                     mysql.commit()
                 if(title == "Heartbeat"):
@@ -166,7 +179,7 @@ def on_message(client, userdata, message):
                     cursor.execute(add, data)
                     mysql.commit()
 
-                    log("Added " + WMIName + ", Row:" + str(rowID), "")
+                    log("Added " + WMIName + " for computer ID: " + str(ID) + ", Row:" + str(rowID), "")
                     cursor.close()
         else:
             mysql.reconnect(attempts=10, delay=0)
