@@ -11,26 +11,40 @@ import mysql.connector
 import datetime
 from mysql.connector.locales.eng import client_error
 from random import randint
+import pkg_resources
 
 ################################# SETUP ##################################
-MQTT_Server = "***"
+MQTT_Server = "****"
 MQTT_Username = "****"
 MQTT_Password = "*****"
 MQTT_Port = 1884
 MQTT_Topic = "#"
 
-MYSQL_Server = "****"
-MYSQL_Username = "*****"
-MYSQL_Password = "*****"
+MYSQL_Server = "*****"
+MYSQL_Username = "****"
+MYSQL_Password = "******"
 MYSQL_Port = 3307
 MYSQL_Database = "rmm"
 
-Server_Version = "1.1"
+Server_Version = "1.2"
 
 LOG_File = "C:\OpenRMMServer.log"
 DEBUG = False
 
 ###########################################################################
+
+required = {'paho-mqtt', 'mysql-connector-python'}
+installed = {pkg.key for pkg in pkg_resources.working_set}
+missing = required - installed
+
+if(len(missing) > 0):
+    print("Missing Modules, please install with the command: python -m pip install modulename")
+    print(missing)
+    print("Attempting to install modules")
+    python = sys.executable
+    subprocess.check_call([python, '-m', 'pip', 'install', *missing], stdout=subprocess.DEVNULL)
+    print("Please restart service and try again.")
+    sys.exit()
 
 # The callback for when the client receives a CONNACK response from the server.
 def on_connect(client, userdata, flags, rc):
@@ -117,7 +131,7 @@ def on_message(client, userdata, message):
                 if(title == "OptionalFeatures"): WMIName = "WMI_OptionalFeatures"
                 if(title == "Processes"): WMIName = "WMI_Processes"
                 if(title == "Services"): WMIName = "WMI_Services"
-                if(title == "UserAccounts"): WMIName = "WMI_UserAccount"
+                if(title == "Users"): WMIName = "WMI_UserAccount"
                 if(title == "VideoConfiguration"): WMIName = "WMI_VideoConfiguration"
                 if(title == "LogicalDisk"): WMIName = "WMI_LogicalDisk"
                 if(title == "MappedLogicalDisk"): WMIName = "WMI_MappedLogicalDisk"
@@ -144,6 +158,7 @@ def on_message(client, userdata, message):
                 if(title == "EventLog_Application"): WMIName = "EventLog_Application"
                 if(title == "EventLog_Security"): WMIName = "EventLog_Security"
                 if(title == "EventLog_Setup"): WMIName = "EventLog_Setup"
+                if(title == "Alert"): WMIName = "Alert"
 
                 if(title == "AgentSettings"):
                     add = ("UPDATE computerdata SET heartbeat=%s, last_update=%s, agent_settings=%s WHERE ID=%s")
