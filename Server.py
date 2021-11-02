@@ -15,7 +15,7 @@ import pkg_resources
 import traceback
 import rsa
 from cryptography.fernet import Fernet
-import crypto
+import Crypto
 import base64
 import binascii
 from Crypto import Random
@@ -39,8 +39,8 @@ MYSQL_Password = "*******"
 MYSQL_Port = 3307
 MYSQL_Database = "OpenRMM"
 
-Server_Version = "1.4"
-PHP_Encrption_Key = b'*******'
+Server_Version = "1.5"
+PHP_Encryption_Key = b'*******'
 
 LOG_File = "C:\OpenRMMServer.log"
 DEBUG = False
@@ -92,7 +92,7 @@ def on_message(client, userdata, message):
             if(typeofdata == "Agent"):
                 if(topic[2] == "New"):
                     hostname = topic[0]
-                    # Generate Encrption Key Here, then encrypt all data with AES, send the encryption key encoded with public key given by server
+                    # Generate Encryption Key Here, then encrypt all data with AES, send the encryption key encoded with public key given by server
                     log("Setup New Agent", "Computer not found, adding as a new computer")
                     add = ("INSERT INTO computers (hostname) VALUES ('" + hostname + "')")
                     cursor.execute(add)
@@ -118,7 +118,7 @@ def on_message(client, userdata, message):
                     # When agent sends Startup, grab the encryption key & send the public key
                     ID = topic[0]
                     log("Set", "Recieved encryption salt from computer ID: " + str(ID) + ", sending Go command.")
-                    Encrption_Keys[ID] = rsa.decrypt(message.payload, Private_Key).decode()
+                    Encryption_Keys[ID] = rsa.decrypt(message.payload, Private_Key).decode()
                     
                     add = ("UPDATE computers SET online=%s WHERE ID=%s")
                     data = ("1", ID)
@@ -140,18 +140,18 @@ def on_message(client, userdata, message):
                     except Exception as e:
                       log("Agent", "Cannot determine if Agent is installed", "Warn")  
                 
-                if(topic[2] == "Sync" and topic[0] not in Encrption_Keys):
+                if(topic[2] == "Sync" and topic[0] not in Encryption_Keys):
                     # Periodic sync of encryption keys
                     ID = topic[0]
                     log("Sync", "Recieved encryption salt from computer ID: " + str(ID))
-                    Encrption_Keys[ID] = rsa.decrypt(message.payload, Private_Key).decode()
+                    Encryption_Keys[ID] = rsa.decrypt(message.payload, Private_Key).decode()
                         
             if(typeofdata == "Data"):
                 ID = topic[0]
                 title = topic[2]
                 # Get the encrptyion Key
-                if(ID in Encrption_Keys):
-                    fernet = Fernet(Encrption_Keys[ID])
+                if(ID in Encryption_Keys):
+                    fernet = Fernet(Encryption_Keys[ID])
                     AllowedData = [
                         "General", "AgentLog",  "BIOS", "Startup", "OptionalFeatures", 
                         "Processes", "Services", "Users", "VideoConfiguration", "LogicalDisk", 
@@ -212,7 +212,7 @@ def on_message(client, userdata, message):
                     Setup["Public_Key"] = Public_Key.save_pkcs1().decode('utf8')
                     mqtt.publish(str(ID) + "/Commands/Sync", json.dumps(Setup), qos=1, retain=False)
                 else:
-                    print("Error - Title: Encription, Message: No Encription key found for agent ID: " + str(ID))
+                    print("Error - Title: Encryption, Message: No Encryption key found for agent ID: " + str(ID))
             cursor.close()
         else:
             mysql.reconnect(attempts=10, delay=0)
@@ -253,18 +253,18 @@ def log(title, message, errorType="Info"):
         if(DEBUG): print(traceback.format_exc())
 
 def encrypt(data: dict) -> str:
-    global PHP_Encrption_Key
+    global PHP_Encryption_Key
     data_json_64 = base64.b64encode(json.dumps(data).encode('ascii'))
     try:
-        key = binascii.unhexlify(PHP_Encrption_Key)
+        key = binascii.unhexlify(PHP_Encryption_Key)
         iv = Random.get_random_bytes(AES.block_size)
         cipher = AES.new(key, AES.MODE_GCM, iv)
         encrypted, tag = cipher.encrypt_and_digest(data_json_64)
         encrypted_64 = base64.b64encode(encrypted).decode('ascii')
         iv_64 = base64.b64encode(iv).decode('ascii')
         tag_64 = base64.b64encode(tag).decode('ascii')
-      
-        return encrypted_64
+        json_data = {'iv': iv_64, 'data': encrypted_64, 'tag': tag_64}
+        return base64.b64encode(json.dumps(json_data).encode('ascii')).decode('ascii')
     except Exception as e:
         print(traceback.format_exc())
         return ''
@@ -282,9 +282,9 @@ print("Created By: Brad & Brandon Sanders")
 print("")
 
 AgentLog = []
-Encrption_Keys = {}
+Encryption_Keys = {}
 Salt_Keys = {}
-log("Setup", "Gernerating RSA Keys")
+log("Setup", "Generating RSA Keys")
 Public_Key, Private_Key = rsa.newkeys(2048)
 log("Setup", "Starting OpenRMM Server Setup, Version: " + Server_Version)
 
