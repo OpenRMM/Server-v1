@@ -6,6 +6,7 @@ An Open source RMM that puts local control and privacy first. Perfect to run on 
 Install:
 * py -m pip install paho-mqtt
 * py -m pip install mysql-connector-python
+* py -m pip install pycryptodome
 
 
 To Run:
