@@ -35,15 +35,15 @@ BLOCK_SIZE = 32
 BLOCK_SZ = 14
 
 ################################# SETUP ##################################
-MQTT_Server = "*****"
-MQTT_Username = "******"
+MQTT_Server = "*******"
+MQTT_Username = "*******"
 MQTT_Password = "****"
 MQTT_Port = 1884
 MQTT_Topic = "#"
 
 MYSQL_Server = "****"
-MYSQL_Username = "*****"
-MYSQL_Password = "*****"
+MYSQL_Username = "****"
+MYSQL_Password = "******"
 MYSQL_Port = 3307
 MYSQL_Database = "OpenRMM"
 
@@ -52,7 +52,7 @@ Service_Display_Name = "OpenRMM Server"
 Service_Description = "A free open-source remote monitoring & management tool."
 
 Server_Version = "1.6"
-PHP_Encryption_Key = b'***'
+PHP_Encryption_Key = b'******'
 
 LOG_File = "C:\OpenRMMServer.log"
 DEBUG = False
@@ -77,7 +77,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
     _svc_name_ = Service_Name
     _svc_display_name_ = Service_Display_Name
     _svc_description_ = Service_Description
-
+    _svc_interactive_process_ = True
     def __init__(self, args):
         win32serviceutil.ServiceFramework.__init__(self, args)
         self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
@@ -203,7 +203,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                     if(topic[2] == "Set"):
                         # When agent sends Startup, grab the encryption key & send the public key
                         ID = topic[0]
-                        self.log("Set", "Recieved encryption salt, session ID from agent ID: " + str(ID) + ", sending Go command.")
+                        self.log("Set", "Recieved encryption key, session ID from agent ID: " + str(ID) + ", sending Go command.")
                         self.Encryption_Keys[ID] = rsa.decrypt(message.payload, self.Private_Key).decode()
                         self.mqtt.publish(str(ID) + "/Commands/Go", "true", qos=1, retain=False)
 
@@ -224,7 +224,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                     if(topic[2] == "Sync" and topic[0] not in self.Encryption_Keys):
                         # Periodic sync of encryption keys
                         ID = topic[0]
-                        self.log("Sync", "Recieved encryption salt from agent ID: " + str(ID))
+                        self.log("Sync", "Recieved encryption key from agent ID: " + str(ID))
                         self.Encryption_Keys[ID] = rsa.decrypt(message.payload, self.Private_Key).decode()
 
                 if(typeofdata == "Status"):
@@ -268,7 +268,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                             cursor.execute(add, data)
                             self.mysql.commit()
 
-                        elif(title == "screenshot"):
+                        elif(title[0:11] == "screenshot_"):
                             # Decrypt the payload
                             DecryptedData = fernet.decrypt(message.payload)
 
@@ -281,9 +281,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                                 cursor.execute(query, (ID, title, DecryptedData))
                                 self.log("Data", "Inserted " + title + " for agent ID: " + str(ID) + ", Row: " + str(cursor.lastrowid))
                             else:
-                                self.log("Data", "Updated " + title + " for agent ID: " + str(ID) + ", Row: " + str(cursor.lastrowid))
-
-                            self.log("screenshot", "Saving Screenshot for Agent ID " + str(ID))
+                                self.log("Data", "Updated " + title + " for agent ID: " + str(ID))
                             self.mysql.commit()
 
                         elif(title in AllowedData):
@@ -320,7 +318,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                                         cursor.execute(query, (ID, title, EncryptedData))
                                         self.log("Data", "Inserted " + title + " for agent ID: " + str(ID) + ", Row: " + str(cursor.lastrowid))
                                     else:
-                                        self.log("Data", "Updated " + title + " for agent ID: " + str(ID) + ", Row: " + str(cursor.lastrowid))
+                                        self.log("Data", "Updated " + title + " for agent ID: " + str(ID))
 
                                     # Proccess Changelog
                                     try:
@@ -328,7 +326,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                                             for (diff) in getDiff:
                                                 if(diff[0] == "change"):
                                                     query = ("INSERT INTO changelog (computer_id, computer_data_name, computer_data_key, old_value, new_value, change_type) VALUES (%s, %s, %s,%s, %s, %s)")
-                                                    if(type(diff[1]) == list):  # Covert list of numbers to . delimited string, similar to php implode
+                                                    if(type(diff[1]) == list):  # Convert list of numbers to . delimited string, similar to php implode
                                                         string_ints = [str(int) for int in diff[1]]
                                                         diff[1] = ".".join(string_ints)
                                                     cursor.execute(query, (ID, title, diff[1], str(diff[2][0]), str(diff[2][1]), diff[0]))
