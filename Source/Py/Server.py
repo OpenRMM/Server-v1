@@ -33,7 +33,6 @@ BLOCK_SIZE = 32
 BLOCK_SZ = 14
 
 ################################# SETUP ##################################
-print("dasfasdfasfasdf")
 try:
     if(exists("C:\OpenRMM\Server\OpenRMM.json")):
         file = open("C:\OpenRMM\Server\OpenRMM.json", "r").read()
@@ -47,6 +46,7 @@ except Exception as e:
 
 ###########################################################################
 
+# Check if required modules are installed, if not prompt the user
 required = {'paho-mqtt', 'pymysql', 'rsa', 'cryptography', 'pycryptodome', 'dictdiffer', 'psutil'}
 installed = {pkg.key for pkg in pkg_resources.working_set}
 missing = required - installed
@@ -71,6 +71,11 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
         self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
         self.isrunning = False
 
+    #################################################
+    # Function Name: SvcDoRun
+    # Purpose: Initial starting point for this service
+    # Example: None
+    #################################################
     def SvcDoRun(self):
         print("   ____                   _____  __  __ __  __ ")
         print("  / __ \                 |  __ \|  \/  |  \/  |")
@@ -82,248 +87,345 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
         print("        |_|                                    ")
         print("Github: https://github.com/OpenRMM/")
         print("Created By: Brad & Brandon Sanders, 2021-2022")
+        print("Version: " + server_settings["Server"]["version"])
         print("")
 
         self.isrunning = True
         self.log("Setup", "Generating RSA Keys")
         self.Public_Key, self.Private_Key = rsa.newkeys(2048)
 
-        self.log("Setup", "Starting OpenRMM Server Setup, Version: " + server_settings["Server"]["version"])
+        self.log("Setup", "Starting OpenRMM Server Setup")
 
-        self.thread_stats = threading.Thread(target=self.stats, args=[True]).start()
+        self.thread_stats = threading.Thread(target=self.stats, args=[True]).start() # Start the Stats() thread
 
         self.log("MQTT", "Connecting to MQTT")
         client_id = os.environ['COMPUTERNAME'] + "_" + str(randint(1000, 10000))
         self.mqtt = mqtt.Client(client_id=client_id, clean_session=True)
         self.mqtt.username_pw_set(server_settings["MQTT"]["username"], server_settings["MQTT"]["password"])
+        self.mqtt.will_set("OpenRMM/Configuration/Encryption/RSA/Keys/Public", "", qos=1, retain=True) # Clear RSA Key when server dies
         self.mqtt.connect(server_settings["MQTT"]["host"], port=server_settings["MQTT"]["port"])
-        self.mqtt.on_message = self.on_message
         self.mqtt.on_connect = self.on_connect
         self.mqtt.on_disconnect = self.on_disconnect
         self.mqtt.subscribe(server_settings["MQTT"]["topic"], qos=1)
-        self.mqtt.loop_start()
-   
-        while self.isrunning: time.sleep(0.5)
 
-    # Service stop request
+        self.mqtt.message_callback_add("+/Agent/New", self.on_message_new_agent) # When new agents are installed
+        self.mqtt.message_callback_add("+/Agent/Ready", self.on_message_agent_ready) # When an agent starts up
+        self.mqtt.message_callback_add("+/Agent/Status", self.on_message_agent_status) # When an agent goes Online/Offline
+        self.mqtt.message_callback_add("+/Agent/Data/CMD", self.on_message_agent_cmd) # When an agent command prompt responce comes back
+        self.mqtt.message_callback_add("+/Agent/Data/+/Update", self.on_message_agent_update) # When an agent sends new data
+        self.mqtt.message_callback_add("+/Server/Command", self.on_message_server_command) # Front end commands sent to control server
+
+        self.mqtt.loop_start()
+        while self.isrunning: time.sleep(0.1)
+
+
+    #################################################
+    # Function Name: SvcStop
+    # Purpose: Called when the service is stopped in Windows
+    # Example: Services page->Stop Service
+    #################################################
     def SvcStop(self):
-        print("Stopping service.")
+        self.log("Service", "Stopping Service.")
         server_settings = None
         self.isrunning = False
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         win32event.SetEvent(self.hWaitStop)  
 
-    # Commands: shutdown, restart, stop service, restart service
-    def Commands(self, command):
-        self.log("Commands", "Running command: " + str(command))
-        if command == 'stop service':
-            win32serviceutil.StopService(server_settings["Service"]["name"])
-        elif command == 'restart service':
-            os.execv(sys.argv[0], sys.argv)
-        elif command == 'shutdown':
-            data = str(subprocess.check_output("shutdown /s /f /t 60", shell=True), "utf-8")
-            data = None
-        elif command == 'restart':
-            data = str(subprocess.check_output("shutdown /r /f /t 30", shell=True), "utf-8")
-            data = None
 
-    # The callback for when the client receives a CONNACK response from the server.
+    #################################################
+    # Function Name: on_connect
+    # Purpose: When MQTT connects or reconnects
+    # Example: None
+    #################################################
     def on_connect(self, client, userdata, flags, rc):
-        self.log("MQTT", "Connected to server: " + server_settings["MQTT"]["host"] + " with result code: " + str(rc))
-
-    def on_disconnect(self, client, userdata, rc):
-        self.log("MQTT", "Unexpected disconnection.", "Warn")
-
-    def on_message(self, client, userdata, message):
         try:
-            #print("MQTT: Received message '" + str(message.payload) + "' on topic '" + message.topic + "' with QoS " + str(message.qos))
-            self.mysql = pymysql.connect(user=server_settings["MySQL"]["username"], password=server_settings["MySQL"]["password"], host=server_settings["MySQL"]["host"], port=server_settings["MySQL"]["port"], database=server_settings["MySQL"]["database"], cursorclass=pymysql.cursors.DictCursor)
-            with self.mysql:
-                with self.mysql.cursor() as cursor:
-                    Setup = {}
-                    topic = message.topic.split("/")
-                    typeofdata = topic[1]
-
-                    if(typeofdata == "Server"): # 1\Server\Command->payload: shutdown
-                        ID = topic[0]
-                        if("ID" in server_settings["Server"]["dbinfo"]):
-                            if(server_settings["Server"]["dbinfo"]["ID"] == int(ID)):
-                                if(topic[2] == "Command"): # shutdown, restart, stop service, restart service
-                                    command = json.loads(message.payload)
-                                    self.Commands(command["payload"])
-                                
-                    elif(typeofdata == "Agent"):
-                        if(topic[2] == "New"):
-                            hostname = topic[0]
-                            # Generate Encryption Key Here, then encrypt all data with AES, send the encryption key encoded with public key given by server
-                            self.log("Setup New Agent", "Computer not found, adding as a new computer")
-                            add = ("INSERT INTO computers () VALUES()")
-                            self.cursor.execute(add)
-                            ID = cursor.lastrowid
-                            self.mysql.commit()
-                            
-                            Setup["ID"] = str(ID)
-                            Setup["Public_Key"] = self.Public_Key.save_pkcs1().decode('utf8')
-                            Setup["Hostname"] = hostname
-
-                            self.log("New Agent", "Added New Computer, ID:" + str(ID))
-                            self.mqtt.publish(hostname + "/Commands/New", json.dumps(Setup), qos=1, retain=False)
-
-                        if(topic[2] == "Ready"):
-                            ID = topic[0]
-                            payload = json.loads(message.payload)
-
-                            # Set session ID, this will be used later for online/offline
-                            server_settings["Session ID"][payload['Session_ID']] = ID
-                            
-                            Setup["ID"] = str(ID)
-                            Setup["Public_Key"] = self.Public_Key.save_pkcs1().decode('utf8')
-                            self.log("Agent Ready", "Sending public key to agent: " + str(ID))
-                            self.mqtt.publish(str(ID) + "/Commands/Ready", json.dumps(Setup), qos=1, retain=False)
-
-                        if(topic[2] == "Set"):
-                            # When agent sends Startup, grab the encryption key & send the public key
-                            ID = topic[0]
-                            self.log("Set", "Recieved encryption key, session ID from agent ID: " + str(ID) + ", sending Go command.")
-                            server_settings["Encryption Keys"][ID] = rsa.decrypt(message.payload, self.Private_Key).decode()
-                            self.mqtt.publish(str(ID) + "/Commands/Go", "true", qos=1, retain=False)
-                        
-                        if(topic[2] == "Sync" and topic[0] not in server_settings["Encryption Keys"]):
-                            # Periodic sync of encryption keys
-                            ID = topic[0]
-                            self.log("Sync", "Recieved encryption key from agent ID: " + str(ID))
-                            server_settings["Encryption Keys"][ID] = rsa.decrypt(message.payload, self.Private_Key).decode()
-                            
-
-                    if(typeofdata == "Status"):
-                        # Get ID from session ID, recieved earlier
-                        session_id = topic[0]
-                        if(session_id in server_settings["Session ID"]):
-                            ID = server_settings["Session ID"][session_id]
-                            self.log("Agent", "Changing Online/Offline status for agent ID: " + str(ID))
-                            add = ("UPDATE computers SET online=%s WHERE ID=%s")
-                            data = (int(message.payload), ID)
-                            cursor.execute(add, data)
-                            self.mysql.commit()
-                            cursor.close()
-
-                    if(typeofdata == "Data"):
-                        ID = topic[0]
-                        title = topic[2]
-                        # Get the encrptyion Key
-                        if(ID in server_settings["Encryption Keys"]):
-                            fernet = Fernet(server_settings["Encryption Keys"][ID])
-
-                            if(title == "CMD"):
-                                # Decrypt the payload
-                                DecryptedData = json.loads(fernet.decrypt(message.payload).decode())
-                                # Encrypt for PHP
-                                if("Response" in DecryptedData):
-                                    EncryptedData = self.encrypt(DecryptedData['Response'])
-                                
-                                    commandID = DecryptedData['Request']['commandID']
-                                    self.log("CMD", "Command Received for: " + ID)
-                                    add = ("UPDATE commands SET data_received=%s, time_received=NOW(), status=%s WHERE computer_id=%s AND ID=%s;")
-                                    data = (EncryptedData, "Received", ID, commandID)
-                                    cursor.execute(add, data)
-                                    self.mysql.commit()
-                                    cursor.close()
-
-                            elif(title in server_settings["Computer Data"]):
-                                loadType = topic[3]
-                                # Decrypt the payload
-                                if(server_settings["Computer Data"][title]["type"] == "raw"):
-                                    DecryptedData = fernet.decrypt(message.payload)
-                                else:
-                                    DecryptedData = json.loads(fernet.decrypt(message.payload).decode())
-                   
-                                if(loadType == "Update"):
-                                    if(ID not in server_settings["Computer Data"][title]["cache"]):
-                                        server_settings["Computer Data"][title]["cache"][ID] = {}
-                                        if(server_settings["Computer Data"][title]["changelog"] == True):
-                                            # Cannot find existing data in Cache, So get data from SQL if exists
-                                            query = "SELECT data FROM computer_data WHERE computer_id=%s AND name=%s AND data<>'' ORDER BY ID DESC LIMIT 1;"
-                                            cursor.execute(query, (ID, title))
-                                            result = cursor.fetchone()
-                                            server_settings["Computer Data"][title]["cache"][ID] = json.loads(self.decrypt(result["data"].decode("UTF-8")))["Response"]
-
-                                    if(ID in server_settings["Computer Data"][title]["cache"]):
-                                        # Changelog
-                                        if(server_settings["Computer Data"][title]["changelog"] == True): 
-                                            # Process data and update array, then update full array to DB
-                                            getDiff = DecryptedData['Response']
-                                            result = (y for y in getDiff)
-                                            try: # Add Diff to cache to get full result
-                                                server_settings["Computer Data"][title]["cache"][ID] = patch(result, server_settings["Computer Data"][title]["cache"][ID])
-                                            except: pass
-
-                                        # Save result in DB, based on its prefered type
-                                        if(server_settings["Computer Data"][title]["type"] == "raw"):
-                                            data = DecryptedData
-                                        else:
-                                            data = json.dumps({"Request": DecryptedData['Request'], "Response": server_settings["Computer Data"][title]["cache"][ID]})
-                                            data = self.encrypt(data) # Encrypt for PHP
-                                            
-                                        # Update Or Insert computer_data
-                                        query = ("UPDATE computer_data set data=%s WHERE computer_id=%s AND name=%s LIMIT 1;")
-                                        cursor.execute(query, (data, ID, title))
-
-                                        if(cursor.rowcount == 0):
-                                            query = ("INSERT INTO computer_data (computer_id, name, data) VALUES (%s, %s, %s);")
-                                            cursor.execute(query, (ID, title, data))
-                                            self.log("Data", "Agent " + str(ID) + ", Inserted " + title + ", Row: " + str(cursor.lastrowid))
-                                        else:
-                                            self.log("Data", "Agent " + str(ID) + ", Updated " + title)
-
-                                        # Proccess Changelog
-                                        try:
-                                            if(server_settings["Computer Data"][title]["changelog"] == True):
-                                                for (diff) in getDiff:
-                                                    if(diff[0] == "change"):
-                                                        query = ("INSERT INTO changelog (computer_id, computer_data_name, computer_data_key, old_value, new_value, change_type) VALUES(%s, %s, %s,%s, %s, %s);")
-                                                        if(type(diff[1]) == list):  # Convert list of numbers to . delimited string, similar to php implode
-                                                            string_ints = [str(int) for int in diff[1]]
-                                                            diff[1] = ".".join(string_ints)
-                                                        cursor.execute(query, (ID, title, diff[1], str(diff[2][0]), str(diff[2][1]), diff[0]))
-
-                                                    elif(diff[0] == "add"):
-                                                        query = ("INSERT INTO changelog (computer_id, computer_data_name, computer_data_key, old_value, new_value, change_type) VALUES(%s, %s, %s,%s, %s, %s);")
-                                                        for (subdiff) in diff[2]:
-                                                            cursor.execute(query, (ID, title, (str(diff[1]) + "." + str(subdiff[0])), "", str(subdiff[1]), "add"))        
-                                        except Exception as e:
-                                            exception_type, exception_object, exception_traceback = sys.exc_info()
-                                            line_number = exception_traceback.tb_lineno
-                                            if(server_settings["Server"]["debug"]): print(traceback.format_exc())
-                                            self.log("OnMQTTMessage - " + title + " - line: " + str(line_number), e, "Error")
-                                        
-                                        self.mysql.commit()
-                                        cursor.close() 
-                                    else:
-                                        return
-
-                        elif(title == "heartbeat"): # Update missing keys when agent sends heartbeat
-                            # Encryption key not found for this agent, asking for key
-                            Setup["ID"] = str(ID)
-                            Setup["Public_Key"] = self.Public_Key.save_pkcs1().decode('utf8')
-                            self.mqtt.publish(str(ID) + "/Commands/Sync", json.dumps(Setup), qos=1, retain=False)
-                        else:
-                            print("Error - Title: Encryption, Message: No Encryption key found for agent ID: " + str(ID))
-
+            self.log("MQTT", "Connected to server: " + server_settings["MQTT"]["host"] + " with result code: " + str(rc))
+            self.log("MQTT", "Sending Event to Server/Status: Started")
+            self.log("MQTT", "Updating RSA Public Key")
+            self.mqtt.publish("OpenRMM/Events/Server/Status", "Started", qos=1, retain=False)
+            self.mqtt.publish("OpenRMM/Configuration/Encryption/RSA/Keys/Public", self.Public_Key.save_pkcs1().decode('utf8'), qos=1, retain=True)
         except Exception as e:
             exception_type, exception_object, exception_traceback = sys.exc_info()
             line_number = exception_traceback.tb_lineno
             if(server_settings["Server"]["debug"]): print(traceback.format_exc())
-            self.log("OnMQTTMessage - Agent " + str(ID) + " - " + title + " - " + str(line_number), e, "Error")
+            self.log("MQTT " + str(line_number), e, "Error")
+
+
+    #################################################
+    # Function Name: on_disconnect
+    # Purpose: When MQTT Disconnects from MQTT server
+    # Example: Server goes offline
+    #################################################
+    def on_disconnect(self, client, userdata, rc):
+        self.log("MQTT", "Unexpected disconnection.", "Warn")
+
+
+    #################################################
+    # Function Name: on_message_server_command
+    # Purpose: When a command is recieved from the front end
+    # Example: 1\Server\Command->payload: shutdown, restart, stop service, restart service
+    #################################################
+    def on_message_server_command(self, client, userdata, message):
+        try:
+            #print("MQTT: Received message '" + str(message.payload) + "' on topic '" + message.topic + "' with QoS " + str(message.qos))      
+            ID = message.topic.split("/")[0]
+            if("ID" in server_settings["Server"]["dbinfo"]):
+                if(server_settings["Server"]["dbinfo"]["ID"] == int(ID)):
+                    command = json.loads(message.payload)
+                    self.Commands(command["payload"])
+        except Exception as e:
+            exception_type, exception_object, exception_traceback = sys.exc_info()
+            line_number = exception_traceback.tb_lineno
+            if(server_settings["Server"]["debug"]): print(traceback.format_exc())
+            self.log("MQTT Message - Server Command, Server: " + str(ID) + " - Line: " + str(line_number), e, "Error")
+
+
+    #################################################
+    # Function Name: on_message_new_agent
+    # Purpose: When an MQTT message is recieved from a new agent
+    # Example: New Agent installed
+    #################################################
+    def on_message_new_agent(self, client, userdata, message):
+        try:
+            ID = None
+            self.mysql = pymysql.connect(user=server_settings["MySQL"]["username"], password=server_settings["MySQL"]["password"], host=server_settings["MySQL"]["host"], port=server_settings["MySQL"]["port"], database=server_settings["MySQL"]["database"], cursorclass=pymysql.cursors.DictCursor)
+            with self.mysql:
+                with self.mysql.cursor() as cursor:
+                    hostname = message.topic.split("/")[0]
+                    # Generate Encryption Key Here, then encrypt all data with AES, send the encryption key encoded with public key given by server
+                    self.log("Setup New Agent", "Computer not found, adding as a new computer")
+                    add = ("INSERT INTO computers () VALUES()")
+                    cursor.execute(add)
+                    ID = cursor.lastrowid
+                    self.mysql.commit()
+                    
+                    self.log("New Agent", "Added New Computer, ID:" + str(ID))
+                    Setup = {"ID":str(ID)}
+                    self.mqtt.publish(hostname + "/Commands/New", json.dumps(Setup), qos=1, retain=False)
+        except Exception as e:
+            exception_type, exception_object, exception_traceback = sys.exc_info()
+            line_number = exception_traceback.tb_lineno
+            if(server_settings["Server"]["debug"]): print(traceback.format_exc())
+            self.log("MQTT Message - New Agent, Agent: " + str(ID) + " - Line: " + str(line_number), e, "Error")
+
+
+    #################################################
+    # Function Name: on_message_agent_ready
+    # Purpose: When the agent, needs to send us the encrption key
+    # Example: Agent startup, computer reboot, manual key refresh
+    #################################################
+    def on_message_agent_ready(self, client, userdata, message):
+        try:
+            ID = message.topic.split("/")[0]
+            self.log("Ready", "Recieved encryption key from agent  ID: " + ID + ", sending Go command.")
+            server_settings["Encryption Keys"][ID] = rsa.decrypt(message.payload, self.Private_Key).decode()
+            self.mqtt.publish(ID + "/Commands/Go", "true", qos=1, retain=False)
+        except Exception as e:
+            exception_type, exception_object, exception_traceback = sys.exc_info()
+            line_number = exception_traceback.tb_lineno
+            if(server_settings["Server"]["debug"]): print(traceback.format_exc())
+            self.log("MQTT Message - Agent Ready, Agent: " + str(ID) + " - Line: " + str(line_number), e, "Error")  
+
+
+    #################################################
+    # Function Name: on_message_agent_status
+    # Purpose: When an MQTT message is recieved from an agent or last will
+    # Example: Online/Offline
+    #################################################
+    def on_message_agent_status(self, client, userdata, message):
+        try:
+            self.mysql = pymysql.connect(user=server_settings["MySQL"]["username"], password=server_settings["MySQL"]["password"], host=server_settings["MySQL"]["host"], port=server_settings["MySQL"]["port"], database=server_settings["MySQL"]["database"], cursorclass=pymysql.cursors.DictCursor)
+            with self.mysql:
+                with self.mysql.cursor() as cursor:
+                    ID = message.topic.split("/")[0]
+                    self.log("Agent", "Changing Online/Offline status for agent ID: " + str(ID))
+                    add = ("UPDATE computers SET online=%s WHERE ID=%s")
+                    data = (int(message.payload), ID)
+                    cursor.execute(add, data)
+                    self.mysql.commit()
+                    cursor.close()
+        except Exception as e:
+            exception_type, exception_object, exception_traceback = sys.exc_info()
+            line_number = exception_traceback.tb_lineno
+            if(server_settings["Server"]["debug"]): print(traceback.format_exc())
+            self.log("MQTT Message - Agent Status, Agent: " + str(ID) + " - Line: " + str(line_number), e, "Error")
+
+
+    #################################################
+    # Function Name: on_message_agent_cmd
+    # Purpose: When the agent sends its command prompt response
+    # Example: CMD is opend and used in web UI
+    #################################################
+    def on_message_agent_cmd(self, client, userdata, message):
+        try:
+            self.mysql = pymysql.connect(user=server_settings["MySQL"]["username"], password=server_settings["MySQL"]["password"], host=server_settings["MySQL"]["host"], port=server_settings["MySQL"]["port"], database=server_settings["MySQL"]["database"], cursorclass=pymysql.cursors.DictCursor)
+            with self.mysql:
+                with self.mysql.cursor() as cursor:
+                    ID = message.topic.split("/")[0]
+
+                    # Get the encrptyion Key
+                    if(ID in server_settings["Encryption Keys"]):
+                        fernet = Fernet(server_settings["Encryption Keys"][ID])
+                        # Decrypt the payload
+                        DecryptedData = json.loads(fernet.decrypt(message.payload).decode())
+                        # Encrypt for PHP
+                        if("Response" in DecryptedData):
+                            EncryptedData = self.encrypt(DecryptedData['Response'])
+                        
+                            commandID = DecryptedData['Request']['commandID']
+                            self.log("CMD", "Command Received for: " + ID)
+                            add = ("UPDATE commands SET data_received=%s, time_received=NOW(), status=%s WHERE computer_id=%s AND ID=%s;")
+                            data = (EncryptedData, "Received", ID, commandID)
+                            cursor.execute(add, data)
+                            self.mysql.commit()
+                            cursor.close()
+        except Exception as e:
+            exception_type, exception_object, exception_traceback = sys.exc_info()
+            line_number = exception_traceback.tb_lineno
+            if(server_settings["Server"]["debug"]): print(traceback.format_exc())
+            self.log("MQTT Message - Agent CMD, Agent: " + str(ID) + " - Line: " + str(line_number), e, "Error")
+
+
+    #################################################
+    # Function Name: on_message_agent_update
+    # Purpose: When an MQTT message is recieved from an agent with new data
+    # Example: Timed data updates or manual refresh from webui
+    #################################################
+    def on_message_agent_update(self, client, userdata, message):
+        try:
+            self.mysql = pymysql.connect(user=server_settings["MySQL"]["username"], password=server_settings["MySQL"]["password"], host=server_settings["MySQL"]["host"], port=server_settings["MySQL"]["port"], database=server_settings["MySQL"]["database"], cursorclass=pymysql.cursors.DictCursor)
+            with self.mysql:
+                with self.mysql.cursor() as cursor:
+                    ID = message.topic.split("/")[0]
+                    title = message.topic.split("/")[3] # Example: sound_devices, pnp_entities
+
+                    if(ID in server_settings["Encryption Keys"]):
+                        fernet = Fernet(server_settings["Encryption Keys"][ID])
+
+                        if(title in server_settings["Computer Data"]):
+                    
+                            # Decrypt the payload
+                            if(server_settings["Computer Data"][title]["type"] == "raw"):
+                                DecryptedData = fernet.decrypt(message.payload)
+                            else:
+                                DecryptedData = json.loads(fernet.decrypt(message.payload).decode())
+                            
+                            if(ID not in server_settings["Computer Data"][title]["cache"]):
+                                server_settings["Computer Data"][title]["cache"][ID] = {}
+                                if(server_settings["Computer Data"][title]["changelog"] == True):
+                                    # Cannot find existing data in Cache, So get data from SQL if exists
+                                    query = "SELECT data FROM computer_data WHERE computer_id=%s AND name=%s AND data<>'' ORDER BY ID DESC LIMIT 1;"
+                                    cursor.execute(query, (ID, title))
+                                    
+                                    if(cursor.rowcount > 0):
+                                        result = cursor.fetchone()
+                                        server_settings["Computer Data"][title]["cache"][ID] = json.loads(self.decrypt(result["data"].decode("UTF-8")))["Response"]
+                                    else:
+                                        server_settings["Computer Data"][title]["cache"][ID] = {}
+
+                            if(ID in server_settings["Computer Data"][title]["cache"]):
+                                # Changelog
+                                if(server_settings["Computer Data"][title]["changelog"] == True): 
+                                    # Process data and update array, then update full array to DB
+                                    getDiff = DecryptedData['Response']
+                                    result = (y for y in getDiff)
+                                    try: # Add Diff to cache to get full result
+                                        server_settings["Computer Data"][title]["cache"][ID] = patch(result, server_settings["Computer Data"][title]["cache"][ID])
+                                    except Exception as e: pass
+
+                                # Save result in DB, based on its prefered type
+                                if(server_settings["Computer Data"][title]["type"] == "raw"):
+                                    data = DecryptedData
+                                else:
+                                    data = json.dumps({"Request": DecryptedData['Request'], "Response": server_settings["Computer Data"][title]["cache"][ID]})
+                                    data = self.encrypt(data) # Encrypt for PHP
+                                
+                                # Check if we need to update or insert
+                                query = "SELECT ID FROM computer_data WHERE computer_id=%s AND name=%s ORDER BY ID DESC LIMIT 1;"
+                                cursor.execute(query, (ID, title))
+                                result = cursor.fetchall()
+                                if(len(result) > 0):
+                                    # Update Or Insert computer_data
+                                    query = ("UPDATE computer_data set data=%s WHERE computer_id=%s AND name=%s LIMIT 1;")
+                                    cursor.execute(query, (data, ID, title))
+                                    self.log("Data", "Agent " + str(ID) + ", Updated " + title)
+                                else:
+                                    query = ("INSERT INTO computer_data (computer_id, name, data) VALUES (%s, %s, %s);")
+                                    cursor.execute(query, (ID, title, data))
+                                    self.log("Data", "Agent " + str(ID) + ", Inserted " + title + ", Row: " + str(cursor.lastrowid))
+                
+                            
+                                # Proccess Changelog
+                                try:
+                                    if(server_settings["Computer Data"][title]["changelog"] == True):
+                                        for (diff) in getDiff:
+                                            if(diff[0] == "change"):
+                                                query = ("INSERT INTO changelog (computer_id, computer_data_name, computer_data_key, old_value, new_value, change_type) VALUES(%s, %s, %s,%s, %s, %s);")
+                                                if(type(diff[1]) == list):  # Convert list of numbers to . delimited string, similar to php implode
+                                                    string_ints = [str(int) for int in diff[1]]
+                                                    diff[1] = ".".join(string_ints)
+                                                cursor.execute(query, (ID, title, diff[1], str(diff[2][0]), str(diff[2][1]), diff[0]))
+
+                                            elif(diff[0] == "add"):
+                                                query = ("INSERT INTO changelog (computer_id, computer_data_name, computer_data_key, old_value, new_value, change_type) VALUES(%s, %s, %s,%s, %s, %s);")
+                                                for (subdiff) in diff[2]:
+                                                    cursor.execute(query, (ID, title, (str(diff[1]) + "." + str(subdiff[0])), "", str(subdiff[1]), "add"))        
+                                except Exception as e:
+                                    exception_type, exception_object, exception_traceback = sys.exc_info()
+                                    line_number = exception_traceback.tb_lineno
+                                    if(server_settings["Server"]["debug"]): print(traceback.format_exc())
+                                    self.log("MQTT Message, Changelog - " + title + " - Line: " + str(line_number), e, "Error")
+                                
+                                self.mysql.commit()
+                                cursor.close() 
+                            else:
+                                return
+        except Exception as e:
+            exception_type, exception_object, exception_traceback = sys.exc_info()
+            line_number = exception_traceback.tb_lineno
+            if(server_settings["Server"]["debug"]): print(traceback.format_exc())
+            self.log("MQTT Message - Agent Update, Agent: " + str(ID) + " - " + title + " - Line: " + str(line_number), e, "Error")
     
 
-    # Log: types: Info, Warn, Error
+    #################################################
+    # Function Name: Commands
+    # Purpose: Commands sent from the front end, to control the server
+    # Example: shutdown, restart, stop service, restart service
+    #################################################
+    def Commands(self, command):
+        try:
+            self.log("Commands", "Running command: " + str(command))
+            if command == 'stop service':
+                win32serviceutil.StopService(server_settings["Service"]["name"])
+            elif command == 'restart service':
+                os.execv(sys.argv[0], sys.argv)
+            elif command == 'shutdown':
+                data = str(subprocess.check_output("shutdown /s /f /t 60", shell=True), "utf-8")
+                data = None
+            elif command == 'update':
+                pass
+            elif command == 'restart':
+                data = str(subprocess.check_output("shutdown /r /f /t 30", shell=True), "utf-8")
+                data = None
+        except Exception as e:
+            exception_type, exception_object, exception_traceback = sys.exc_info()
+            line_number = exception_traceback.tb_lineno
+            if(server_settings["Server"]["debug"]): print(traceback.format_exc())
+            self.log("Commands, Line: " + str(line_number), e, "Error")
+
+
+    #################################################
+    # Function Name: log
+    # Purpose: To log to warn & errors to file and send all to front end
+    # Example: log("test", "this is a test", Info), types: Info, Warn, Error
+    #################################################
     def log(self, title, message, errorType="Info"):    
         try:
             logEvent = {}
             logEvent["Title"] = title 
             logEvent["Message"] = str(message)
             logEvent["Type"] = errorType
-            logEvent["Time"] = str(datetime.datetime.now())
+            logEvent["Time"] = str(datetime.datetime.now().strftime("%m-%d-%y %I:%M:%S %p"))
             server_settings["Server Log"].append(logEvent) 
 
             print(logEvent["Time"] + ": " + logEvent["Type"] + ", " + "Title: " + logEvent["Title"] + ", Message: " + logEvent["Message"])
@@ -338,11 +440,17 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
             print(e)
             if(server_settings["Server"]["debug"]): print(traceback.format_exc())
 
-    # source: https://gist.github.com/ahbanavi/ff3c0711b45f5056f821c00438af8f67
+ 
+    #################################################
+    # Function Name: encrypt
+    # Purpose: To encrpt data before adding it to MySQL
+    # Example: Data saved to MySQL for use in PHP
+    # Source: https://gist.github.com/ahbanavi/ff3c0711b45f5056f821c00438af8f67
+    #################################################
     def encrypt(self, data: dict) -> str:
         data_json_64 = base64.b64encode(json.dumps(data).encode('ascii'))
         try:
-            key = binascii.unhexlify(b(server_settings["Server"]["php_encryption_key"]))
+            key = binascii.unhexlify(str.encode(server_settings["Server"]["php_encryption_key"]))
             iv = get_random_bytes(AES.block_size)
             cipher = AES.new(key, AES.MODE_GCM, iv)
             encrypted, tag = cipher.encrypt_and_digest(data_json_64)
@@ -355,9 +463,15 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
             if(server_settings["Server"]["debug"]): print(traceback.format_exc())
             return ''
         
+    #################################################
+    # Function Name: decrypt
+    # Purpose: To decrpt data recieved from MySQL
+    # Example: Data saved to MySQL for use in PHP
+    # Source: https://gist.github.com/ahbanavi/ff3c0711b45f5056f821c00438af8f67
+    #################################################
     def decrypt(self, data) -> dict:
         try:
-            key = binascii.unhexlify(b(server_settings["Server"]["php_encryption_key"]))
+            key = binascii.unhexlify(str.encode(server_settings["Server"]["php_encryption_key"]))
             encrypted = json.loads(base64.b64decode(str(data)).decode('ascii'))
             encrypted_data = base64.b64decode(encrypted['data'])
             iv = base64.b64decode(encrypted['iv'])
@@ -369,21 +483,13 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
             if(server_settings["Server"]["debug"]): print(traceback.format_exc())
             return ''
 
-    # This function updates the server stats of this 
-    # server ONLY every 60 seconds and save it to the servers table in the DB 
+
+    #################################################
+    # Function Name: stats
+    # Purpose: Updates the server stats in MySQL every 60 seconds
+    # Example: Data can be seen in front end
+    #################################################
     def stats(self, loop = False):
-        try:
-            self.mysql = pymysql.connect(user=server_settings["MySQL"]["username"], password=server_settings["MySQL"]["password"], host=server_settings["MySQL"]["host"], port=server_settings["MySQL"]["port"], database=server_settings["MySQL"]["database"], cursorclass=pymysql.cursors.DictCursor)
-            with self.mysql:
-                with self.mysql.cursor() as cursor:    
-                    query = ("INSERT IGNORE INTO servers SET hostname=%s;")
-                    cursor.execute(query, (os.environ['COMPUTERNAME'],))
-                    self.mysql.commit()
-                    cursor.close()
-
-        except Exception as e:
-            if(server_settings["Server"]["debug"]): print(traceback.format_exc())
-
         loop_count = 0
         while(server_settings["Server"]["uptime"] == 0 or loop == True):
             try:
@@ -392,7 +498,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                 if(loop_count == 1): # Run every minute
                     loop_count = 0
                     server_settings["Server"]["uptime"] += 1
-                    print("Info - Title: Updating Server Stats")
+                    print(str(datetime.datetime.now().strftime("%m-%d-%y %I:%M:%S %p")) + ": Info, Updating Server Stats")
         
                     # General Stats
                     statistics = {
@@ -450,8 +556,8 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                     self.mysql = pymysql.connect(user=server_settings["MySQL"]["username"], password=server_settings["MySQL"]["password"], host=server_settings["MySQL"]["host"], port=server_settings["MySQL"]["port"], database=server_settings["MySQL"]["database"], cursorclass=pymysql.cursors.DictCursor)
                     with self.mysql:
                         with self.mysql.cursor() as cursor:
-                            query = ("UPDATE servers SET statistics=%s WHERE hostname=%s;")
-                            cursor.execute(query, (json.dumps(statistics), os.environ['COMPUTERNAME']))
+                            query = ("INSERT INTO servers (hostname, statistics) VALUES (%s, %s) ON DUPLICATE KEY UPDATE statistics=%s")
+                            cursor.execute(query, (os.environ['COMPUTERNAME'], json.dumps(statistics), json.dumps(statistics)))
                             
                             query = "SELECT ID FROM servers WHERE hostname=%s ORDER BY ID DESC LIMIT 1;"
                             cursor.execute(query, (os.environ['COMPUTERNAME'],))
@@ -460,9 +566,11 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                             cursor.close()
                 time.sleep(30)
             except Exception as e:
+                exception_type, exception_object, exception_traceback = sys.exc_info()
+                line_number = exception_traceback.tb_lineno
                 if(server_settings["Server"]["debug"]): print(traceback.format_exc())
+                self.log("Stats, Line: " + str(line_number), e, "Error")
 
-                
-   
+
 if __name__ == "__main__":
     win32serviceutil.HandleCommandLine(OpenRMMServer)
