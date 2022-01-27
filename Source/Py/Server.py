@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 #To DO:
-# Send session id on sync
 # Create Changelog
 
 import os, sys
@@ -97,19 +96,21 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
         self.log("Setup", "Starting OpenRMM Server Setup")
 
         self.thread_stats = threading.Thread(target=self.stats, args=[True]).start() # Start the Stats() thread
+        self.thread_renew_encryption_keys = threading.Thread(target=self.renew_encryption_keys, args=[]).start() # Start the Auto renew all encryption keys
 
         self.log("MQTT", "Connecting to MQTT")
         client_id = os.environ['COMPUTERNAME'] + "_" + str(randint(1000, 10000))
         self.mqtt = mqtt.Client(client_id=client_id, clean_session=True)
         self.mqtt.username_pw_set(server_settings["MQTT"]["username"], server_settings["MQTT"]["password"])
-        self.mqtt.will_set("OpenRMM/Configuration/Encryption/RSA/Keys/Public", "", qos=1, retain=True) # Clear RSA Key when server dies
+        self.mqtt.will_set("OpenRMM/Events/Server/Status", "", qos=1, retain=True) # Clear RSA Key when server dies
         self.mqtt.connect(server_settings["MQTT"]["host"], port=server_settings["MQTT"]["port"])
         self.mqtt.on_connect = self.on_connect
         self.mqtt.on_disconnect = self.on_disconnect
         self.mqtt.subscribe(server_settings["MQTT"]["topic"], qos=1)
 
         self.mqtt.message_callback_add("+/Agent/New", self.on_message_new_agent) # When new agents are installed
-        self.mqtt.message_callback_add("+/Agent/Ready", self.on_message_agent_ready) # When an agent starts up
+        self.mqtt.message_callback_add("+/Agent/Encryption/Update", self.on_message_agent_encryption_update) # When new agents are installed
+
         self.mqtt.message_callback_add("+/Agent/Status", self.on_message_agent_status) # When an agent goes Online/Offline
         self.mqtt.message_callback_add("+/Agent/Data/CMD", self.on_message_agent_cmd) # When an agent command prompt responce comes back
         self.mqtt.message_callback_add("+/Agent/Data/+/Update", self.on_message_agent_update) # When an agent sends new data
@@ -142,7 +143,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
             self.log("MQTT", "Connected to server: " + server_settings["MQTT"]["host"] + " with result code: " + str(rc))
             self.log("MQTT", "Sending Event to Server/Status: Started")
             self.log("MQTT", "Updating RSA Public Key")
-            self.mqtt.publish("OpenRMM/Events/Server/Status", "Started", qos=1, retain=False)
+            self.mqtt.publish("OpenRMM/Events/Server/Status", "Started", qos=1, retain=True)
             self.mqtt.publish("OpenRMM/Configuration/Encryption/RSA/Keys/Public", self.Public_Key.save_pkcs1().decode('utf8'), qos=1, retain=True)
         except Exception as e:
             exception_type, exception_object, exception_traceback = sys.exc_info()
@@ -199,7 +200,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                     ID = cursor.lastrowid
                     self.mysql.commit()
                     
-                    self.log("New Agent", "Added New Computer, ID:" + str(ID))
+                    self.log("New Agent", "Added New Computer, ID: " + str(ID))
                     Setup = {"ID":str(ID)}
                     self.mqtt.publish(hostname + "/Commands/New", json.dumps(Setup), qos=1, retain=False)
         except Exception as e:
@@ -210,21 +211,20 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
 
 
     #################################################
-    # Function Name: on_message_agent_ready
-    # Purpose: When the agent, needs to send us the encrption key
+    # Function Name: on_message_agent_encryption_update
+    # Purpose: When the agent sends us the encrption key
     # Example: Agent startup, computer reboot, manual key refresh
     #################################################
-    def on_message_agent_ready(self, client, userdata, message):
+    def on_message_agent_encryption_update(self, client, userdata, message):
         try:
             ID = message.topic.split("/")[0]
-            self.log("Ready", "Recieved encryption key from agent  ID: " + ID + ", sending Go command.")
+            self.log("Ready", "Recieved encryption key from agent ID: " + ID)
             server_settings["Encryption Keys"][ID] = rsa.decrypt(message.payload, self.Private_Key).decode()
-            self.mqtt.publish(ID + "/Commands/Go", "true", qos=1, retain=False)
         except Exception as e:
             exception_type, exception_object, exception_traceback = sys.exc_info()
             line_number = exception_traceback.tb_lineno
             if(server_settings["Server"]["debug"]): print(traceback.format_exc())
-            self.log("MQTT Message - Agent Ready, Agent: " + str(ID) + " - Line: " + str(line_number), e, "Error")  
+            self.log("MQTT Message - Agent Encryption Update, Agent: " + str(ID) + " - Line: " + str(line_number), e, "Error")  
 
 
     #################################################
@@ -404,6 +404,10 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                 data = None
             elif command == 'update':
                 pass
+            elif command == 'renew_keys':
+                self.log("Commands", "Generating RSA Keys")
+                self.Public_Key, self.Private_Key = rsa.newkeys(2048)
+                self.mqtt.publish("OpenRMM/Configuration/Encryption/RSA/Keys/Public", self.Public_Key.save_pkcs1().decode('utf8'), qos=1, retain=True)
             elif command == 'restart':
                 data = str(subprocess.check_output("shutdown /r /f /t 30", shell=True), "utf-8")
                 data = None
@@ -459,7 +463,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
             tag_64 = base64.b64encode(tag).decode('ascii')
             json_data = {'iv': iv_64, 'data': encrypted_64, 'tag': tag_64}
             return base64.b64encode(json.dumps(json_data).encode('ascii')).decode('ascii')
-        except:  # noqa
+        except Exception as e:  # noqa
             if(server_settings["Server"]["debug"]): print(traceback.format_exc())
             return ''
         
@@ -483,6 +487,23 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
             if(server_settings["Server"]["debug"]): print(traceback.format_exc())
             return ''
 
+
+    #################################################
+    # Function Name: renew_encryption_keys
+    # Purpose: Update the RSA keys & each agents salt
+    # Example: Reset all encryptopn keys after 7 days
+    #################################################
+    def renew_encryption_keys(self):
+        try:
+            loop_count = 0
+            while(True):
+                time.sleep(86400) # 1 day
+                loop_count += 1
+                if(loop_count == 7):
+                    loop_count = 0
+                    self.Commands("renew_keys")
+        except: pass
+            
 
     #################################################
     # Function Name: stats
@@ -564,6 +585,7 @@ class OpenRMMServer(win32serviceutil.ServiceFramework):
                             server_settings["Server"]["dbinfo"] = cursor.fetchone()
                             self.mysql.commit()
                             cursor.close()
+                
                 time.sleep(30)
             except Exception as e:
                 exception_type, exception_object, exception_traceback = sys.exc_info()
